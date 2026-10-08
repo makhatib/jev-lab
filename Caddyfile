@@ -1,0 +1,8 @@
+:8080 {
+	handle /agent* {
+		reverse_proxy agent:8090
+	}
+	handle {
+		reverse_proxy web:8080
+	}
+}

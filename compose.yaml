@@ -1,0 +1,79 @@
+# Jev Lab — self-hosted. Start with: docker compose up -d --build   → http://localhost:8080
+#
+# Network fence for the agent's browser:
+#   chrome  -- cdpnet (internal) --> agent      (agent drives Chrome; agent refuses requests from Chrome)
+#   chrome  -- egressnet (internal) --> egress --> internet   (public IPs, ports 80/443 only)
+# Chrome has no other route: both of its networks are internal-only.
+services:
+  # Single entry point: /agent/* goes to the browser agent, everything else to the web app.
+  # Bound to 127.0.0.1 on purpose: the Setup page stores your keys, so do not expose it without auth.
+  proxy:
+    image: caddy:2.10-alpine
+    restart: unless-stopped
+    ports: ["127.0.0.1:${JEV_LAB_PORT:-8080}:8080"]
+    volumes: [./Caddyfile:/etc/caddy/Caddyfile:ro]
+    networks: [front]
+    depends_on: [web, agent]
+
+  web:
+    build: .
+    restart: unless-stopped
+    networks: [front]
+    volumes: [jev-data:/data]
+    environment:
+      - TYPESAFE_API_KEY=${TYPESAFE_API_KEY:-}
+      - CLAUDE_CODE_OAUTH_TOKEN=${CLAUDE_CODE_OAUTH_TOKEN:-}
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
+    mem_limit: 512m
+    cpus: 1.0
+    pids_limit: 256
+
+  # Browser agent: Jev clicks, Claude plans/writes/verifies.
+  agent:
+    build: ./agent
+    restart: unless-stopped
+    networks: [front, cdpnet]
+    volumes: [jev-data:/keys:ro, agent-runs:/runs]
+    environment:
+      - CHROME_HOST=chrome
+      - KEYS_FILE=/keys/keys.json
+      - TYPESAFE_API_KEY=${TYPESAFE_API_KEY:-}
+      - CLAUDE_CODE_OAUTH_TOKEN=${CLAUDE_CODE_OAUTH_TOKEN:-}
+    depends_on: [chrome]
+    mem_limit: 1g
+    cpus: 1.5
+    pids_limit: 256
+
+  # Headless Chromium. No published ports, no direct internet: everything goes through `egress`.
+  chrome:
+    image: chromedp/headless-shell@sha256:f70908c8020555a3bf89a070140913b443a03ead28c1a66563c3912a3b32b08d
+    restart: unless-stopped
+    networks: [cdpnet, egressnet]
+    shm_size: 1gb
+    mem_limit: 2g
+    cpus: 2.0
+    pids_limit: 512
+    depends_on: [egress]
+    command: ["--no-first-run", "--disable-sync", "--lang=en-US", "--window-size=1120,780",
+              "--proxy-server=http://egress:3128", "--proxy-bypass-list=<-loopback>", "--disable-quic",
+              "--disable-background-networking"]
+
+  # The browser's only exit: public addresses on ports 80/443, checked at connect time.
+  egress:
+    build: ./egress
+    restart: unless-stopped
+    networks: [egressnet, outnet]
+    mem_limit: 256m
+    cpus: 0.5
+    pids_limit: 64
+
+volumes:
+  jev-data:
+  agent-runs:
+networks:
+  front: {}
+  cdpnet:
+    internal: true
+  egressnet:
+    internal: true
+  outnet: {}

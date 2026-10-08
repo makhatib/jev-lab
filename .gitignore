@@ -1,0 +1,13 @@
+# Secrets: never commit these
+.env
+*.env
+!.env.example
+keys.json
+data/
+
+# Local artifacts
+node_modules/
+runs/
+__pycache__/
+*.pyc
+.DS_Store
