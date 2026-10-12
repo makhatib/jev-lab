@@ -181,6 +181,86 @@ const limits = [
   },
 ];
 
+// 20 messages with one clear right answer each, for the Jev vs Decisions accuracy check.
+const BENCH = [
+  ["طلبي ما وصل لليوم وأنا دافع من أسبوع", "complaint"],
+  ["الموظف كان وقح معي ورفع صوته عليّ", "complaint"],
+  ["ثالث مرة يجيني الطلب ناقص، وش هالخدمة", "complaint"],
+  ["الأكل وصل بارد والكمية أقل من الصورة بكثير", "complaint"],
+  ["أبي أطلب ٢ آيفون ١٧ برو، وش أسرع طريقة أدفع؟", "purchase"],
+  ["نبي نشتري ٥٠ كرسي مكتب للشركة هالأسبوع، أرسلوا عرض سعر", "purchase"],
+  ["تكفون أبي ٣ كراتين موية توصل لبيتي اليوم", "purchase"],
+  ["ابي احجز موعد صيانة للمكيف بكرة الصبح", "purchase"],
+  ["متى تفتحون يوم الجمعة؟", "inquiry"],
+  ["عندكم فرع في أبها؟", "inquiry"],
+  ["هل يوجد توصيل للدمام؟", "inquiry"],
+  ["وش سياسة الاسترجاع عندكم؟", "inquiry"],
+  ["التطبيق يعلق عند صفحة الدفع", "technical"],
+  ["ما أقدر أسجل دخول، يقول كلمة المرور خطأ وأنا متأكد منها", "technical"],
+  ["الموقع ما يفتح من الصبح، يطلع لي خطأ 500", "technical"],
+  ["ألغوا طلبي رقم ٧٧٣١ ورجعوا فلوسي", "refund"],
+  ["أبغى أرجّع الجزمة، المقاس صغير وأبي المبلغ", "refund"],
+  ["ابي استرجع فلوس الاشتراك السنوي، ما استخدمته ولا مرة", "refund"],
+  ["السلام عليكم", "other"],
+  ["شكراً على الخدمة الحلوة، الله يعطيكم العافية", "other"],
+];
+
+// The same department question with Arabic instructions: does each model follow Arabic questions?
+function triageQuestionAr() {
+  return {
+    type: "choice",
+    instructions: "أي قسم لازم يستلم رسالة العميل هذي؟ الرسالة ممكن تكون باللهجة الخليجية.",
+    criteria: {
+      complaint: "العميل يشتكي من تجربة سيئة أو عيب أو تأخير أو خدمة سيئة.",
+      purchase: "العميل يبي يشتري أو يطلب أو يحجز، أو يطلب عرض سعر عشان يشتري الحين.",
+      inquiry: "العميل يسأل سؤال عام (أوقات الدوام، الموقع، السياسات، معلومات منتج) بدون شكوى أو طلب.",
+      technical: "العميل يبلّغ عن مشكلة تقنية في التطبيق أو الموقع أو الدفع أو الدخول أو جهاز.",
+      refund: "العميل يبي يلغي طلب أو يسترجع فلوسه.",
+      other: "غير ذلك: تحية، شكر، سبام، أو كلام ما له علاقة.",
+    },
+  };
+}
+
+// Image cases. Only OpenAI Decisions reads images; Jev is text-only.
+const vision = {
+  damage: {
+    prompt: "A customer sent this photo with a return or warranty claim. Inspect the product in the photo.",
+    questions: (withNote) => ({
+      visible_damage: { type: "noul", instructions: "Does the product have visible damage, such as a crack, tear, dent, stain, or broken part? Ignore shadows, reflections, and damage to the packaging only." },
+      severity: { type: "score", instructions: "How bad is the visible damage to the product?", criteria: ["No damage", "Cosmetic only (scratch, small mark)", "Damaged but still usable", "Broken or unusable"] },
+      category: { type: "choice", instructions: "What kind of product is in the photo?", criteria: { electronics: "Phones, laptops, screens, appliances, gadgets", clothing: "Clothes, shoes, bags, accessories", furniture: "Furniture and home items", food: "Food or drink", other: "Anything else, or no product visible" } },
+      ...(withNote ? { claim_supported: { type: "noul", instructions: "Does the photo support what the customer says in their message?" } } : {}),
+    }),
+    decide(a) {
+      const reasons = [];
+      let action;
+      if (a.visible_damage.noul >= 0.75 && a.severity.score >= 1.5) { action = "approve"; reasons.push("ضرر واضح وكبير في الصورة"); }
+      else if (a.visible_damage.noul <= 0.25) { action = "reject_photo"; reasons.push("ما فيه ضرر واضح في الصورة"); }
+      else { action = "review"; reasons.push("الصورة مو حاسمة"); }
+      if (a.claim_supported && a.claim_supported.noul < 0.5 && action === "approve") { action = "review"; reasons.push("الصورة ما تطابق كلام العميل"); }
+      return { action, reasons };
+    },
+  },
+  listing: {
+    prompt: "A seller uploaded this photo for a product listing on an online marketplace.",
+    questions: () => ({
+      is_product: { type: "noul", instructions: "The photo clearly shows a product for sale (not a screenshot, meme, or unrelated picture)." },
+      quality: { type: "score", instructions: "How good is this photo for a marketplace listing?", criteria: ["Unusable (blurry, dark, or product not visible)", "Poor", "Acceptable", "Professional"] },
+      face: { type: "noul", instructions: "A person's face is clearly visible in the photo." },
+      contact_info: { type: "noul", instructions: "The photo contains a phone number, social media handle, or other contact details written on it." },
+    }),
+    decide(a) {
+      const reasons = [];
+      let action = "publish";
+      if (a.is_product.noul < 0.5) { action = "reject"; reasons.push("الصورة ما تعرض منتج"); }
+      if (a.contact_info.noul > 0.6) { action = "reject"; reasons.push("فيها رقم أو حساب تواصل (ممنوع)"); }
+      if (action === "publish" && a.face.noul > 0.6) { action = "review"; reasons.push("فيها وجه شخص — خصوصية"); }
+      if (action === "publish" && a.quality.score < 1.5) { action = "retake"; reasons.push("جودة الصورة ضعيفة"); }
+      return { action, reasons };
+    },
+  },
+};
+
 function pct(x) { return Math.round(x * 100) + "٪"; }
 
-module.exports = { scenarios, limits, DEPARTMENTS };
+module.exports = { scenarios, limits, DEPARTMENTS, BENCH, triageQuestionAr, vision };

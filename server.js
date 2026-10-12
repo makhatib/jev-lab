@@ -1,18 +1,21 @@
 const http = require("http");
 const fs = require("fs");
 const path = require("path");
-const { scenarios, limits, DEPARTMENTS } = require("./scenarios");
+const { scenarios, limits, DEPARTMENTS, BENCH, triageQuestionAr, vision } = require("./scenarios");
 
 const PORT = process.env.PORT || 8080;
 const DATA = process.env.DATA_DIR || "/data";
 const KEYS_FILE = path.join(DATA, "keys.json");
 const TS_URL = process.env.TYPESAFE_BASE_URL || "https://api.typesafe.ai/v1";
 const MODEL = process.env.JEV_MODEL || "jev-latest";
+const OPENAI_URL = process.env.OPENAI_BASE_URL || "https://api.openai.com/v1";
+const LUNA = process.env.DECISIONS_MODEL || "gpt-6-luna";   // OpenAI Decisions API (public beta)
 
 // Prices in USD per input/output token.
 const PRICE = {
   jev: { in: 0.042 / 1e6, out: 0 },
   opus: { in: 4 / 1e6, out: 20 / 1e6 }, // claude-opus-5-5
+  luna: { in: 0.10 / 1e6, out: 0 },     // gpt-6-luna on /v1/decisions: input only
 };
 const BIG_MODEL = "claude-opus-5-5";
 
@@ -21,6 +24,7 @@ try { keys = JSON.parse(fs.readFileSync(KEYS_FILE, "utf8")); } catch {}
 const tsKey = () => process.env.TYPESAFE_API_KEY || keys.typesafe;
 const antKey = () => process.env.ANTHROPIC_API_KEY || keys.anthropic;
 const subToken = () => process.env.CLAUDE_CODE_OAUTH_TOKEN || keys.claudeToken;
+const oaKey = () => process.env.OPENAI_API_KEY || keys.openai;
 
 const ROUTER_PROMPT = () => "You route customer messages. Reply with JSON only: {\"department\": <one of " + Object.keys(DEPARTMENTS).join(", ") + ">, \"confidence\": <0..1>}.\n" +
   Object.entries(DEPARTMENTS).map(([k, v]) => `- ${k}: ${v}`).join("\n");
@@ -72,6 +76,57 @@ async function jev(state, questions, key = tsKey()) {
   return { ...body, ms, cost: inTok * PRICE.jev.in };
 }
 
+// ---------- OpenAI Decisions (gpt-6-luna) ----------
+// Jev and Decisions ask the same three kinds of question, so one question set drives both:
+//   Jev choice {criteria: {value: description}}  -> Decisions choice {choices: [{value, description}]}
+//   Jev score  {criteria: [label, ...]}          -> Decisions score  {levels: [{label}]}
+//   Jev noul   {instructions}                    -> Decisions predicate
+function toDecisions(questions) {
+  return Object.entries(questions).map(([name, q]) => {
+    if (q.type === "choice") return { type: "choice", name, instructions: q.instructions,
+      choices: Object.entries(q.criteria).map(([value, d]) => (d ? { value, description: d } : { value })) };
+    if (q.type === "score") return { type: "score", name, instructions: q.instructions, levels: q.criteria.map((label) => ({ label })) };
+    if (q.type === "noul") return { type: "predicate", name, instructions: q.instructions };
+    throw httpErr(400, "نوع سؤال غير معروف: " + q.type);
+  });
+}
+
+// Back to Jev's answer shape, so the same decide() code and the same UI read both models.
+function fromDecisions(answers) {
+  const out = {};
+  for (const a of answers || []) {
+    if (a.type === "predicate") out[a.name] = { type: "noul", noul: a.probability };
+    else if (a.type === "choice") out[a.name] = { type: "choice", choice: String(a.choice), confidence: a.confidence,
+      probabilities: Object.fromEntries(a.probabilities.map((p) => [String(p.value), p.probability])) };
+    else if (a.type === "score") out[a.name] = { type: "score", score: a.score, confidence: a.confidence,
+      legend: Object.fromEntries(a.probabilities.map((p) => [String(p.value), p.label])),
+      probabilities: Object.fromEntries(a.probabilities.map((p) => [String(p.value), p.probability])) };
+    else out[a.name] = { type: "refusal" };
+  }
+  return out;
+}
+
+// input: a text string, or {text, image} where image is a data: URL (Decisions takes inline base64 only).
+async function luna(input, questions, key = oaKey()) {
+  if (!key) throw httpErr(503, "مفتاح OpenAI غير موجود. افتح صفحة الإعداد.");
+  const body = { model: LUNA, questions: toDecisions(questions),
+    input: typeof input === "string" ? input : [{ role: "user", content: [
+      ...(input.text ? [{ type: "input_text", text: input.text }] : []),
+      { type: "input_image", image_url: input.image }] }] };
+  const t0 = performance.now();
+  const r = await fetch(`${OPENAI_URL}/decisions`, {
+    method: "POST",
+    headers: { Authorization: `Bearer ${key}`, "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+    signal: AbortSignal.timeout(30000),
+  });
+  const j = await r.json().catch(() => ({}));
+  const ms = performance.now() - t0;   // same boundary as jev(): request sent until the parsed answer
+  if (!r.ok) throw httpErr(r.status === 401 ? 400 : r.status, "OpenAI: " + (j?.error?.message || `error ${r.status}`));
+  const inTok = j.usage?.input_tokens || 0;
+  return { model: j.model || LUNA, answers: fromDecisions(j.answers), raw: j.answers, usage: j.usage, ms, cost: inTok * PRICE.luna.in };
+}
+
 // Rough cost of sending the same job to a large LLM. Labelled as an estimate in the UI.
 function bigModelEstimate(inputTokens, outputTokens = 80) {
   return inputTokens * PRICE.opus.in + outputTokens * PRICE.opus.out;
@@ -117,12 +172,12 @@ function shuffleCriteria(questions) {
 }
 
 const routes = {
-  "GET /api/status": async () => ({ typesafe: !!tsKey(), anthropic: !!(subToken() || antKey()), claudeVia: subToken() ? "subscription" : antKey() ? "api" : null, model: MODEL, prices: PRICE }),
+  "GET /api/status": async () => ({ typesafe: !!tsKey(), anthropic: !!(subToken() || antKey()), claudeVia: subToken() ? "subscription" : antKey() ? "api" : null, openai: !!oaKey(), luna: LUNA, model: MODEL, prices: PRICE }),
 
   // Keys can be set once; replacing an existing key needs an explicit "replace" (the UI asks for it).
   "POST /api/setup": async (b) => {
     const out = {};
-    const has = { typesafeKey: keys.typesafe, claudeToken: keys.claudeToken, anthropicKey: keys.anthropic };
+    const has = { typesafeKey: keys.typesafe, claudeToken: keys.claudeToken, anthropicKey: keys.anthropic, openaiKey: keys.openai };
     for (const k of Object.keys(has)) if (b[k] && has[k] && b.replace !== true) throw httpErr(409, "المفتاح موجود. فعّل «استبدال» لتغييره.");
     if (b.typesafeKey) {
       const r = await fetch(`${TS_URL}/models`, { headers: { Authorization: `Bearer ${b.typesafeKey}` } });
@@ -140,6 +195,12 @@ const routes = {
       if (!r.ok) throw httpErr(400, "مفتاح Anthropic غير صحيح (" + r.status + ")");
       keys.anthropic = b.anthropicKey.trim();
       out.anthropic = true;
+    }
+    if (b.openaiKey) {
+      const r = await fetch(`${OPENAI_URL}/models`, { headers: { Authorization: `Bearer ${b.openaiKey.trim()}` } });
+      if (!r.ok) throw httpErr(400, "مفتاح OpenAI غير صحيح (" + r.status + ")");
+      keys.openai = b.openaiKey.trim();
+      out.openai = true;
     }
     saveKeys();
     return out;
@@ -194,6 +255,54 @@ const routes = {
       usage: { input_tokens: inTok }, cost: rs.reduce((s, r) => s + r.cost, 0), estimate: bigModelEstimate(inTok, 40 * msgs.length) };
   },
 
+  // Jev vs OpenAI Decisions: same text, same questions, same decide() code.
+  // The UI calls each side separately so each timer stops when its own answer arrives.
+  "POST /api/duel": async (b) => {
+    const sc = scenarios[b.scenario];
+    if (!sc) throw httpErr(400, "سيناريو غير معروف");
+    if (typeof b.state !== "string" || !b.state.trim() || b.state.length > 5000) throw httpErr(400, "النص فاضي أو طويل جداً");
+    const questions = sc.questions();
+    if (b.lang === "ar" && b.scenario === "triage") questions.department = triageQuestionAr();
+    const r = b.which === "luna" ? await luna(b.state, questions) : await jev(b.state, questions);
+    const { raw, ...rest } = r;
+    return { ...rest, decision: sc.decide(r.answers, b.opts || {}), questions };
+  },
+
+  // 20 messages with a known answer, through both models. Accuracy, latency per request, cost.
+  "POST /api/bench": async (b) => {
+    const q = { department: b.lang === "ar" ? triageQuestionAr() : scenarios.triage.questions().department };
+    const run = async (fn) => {
+      const rs = new Array(BENCH.length); let next = 0; const t0 = performance.now();
+      await Promise.all(Array.from({ length: 8 }, async () => {
+        while (next < BENCH.length) {
+          const i = next++;
+          rs[i] = await fn(BENCH[i][0], q).catch((e) => ({ error: e.message }));
+        }
+      }));
+      const wall = performance.now() - t0;
+      const ok = rs.filter((r) => !r.error);
+      const lat = ok.map((r) => r.ms).sort((a, c) => a - c);
+      const at = (p) => lat.length ? lat[Math.min(lat.length - 1, Math.floor(p * lat.length))] : null;
+      const rows = rs.map((r, i) => r.error ? { error: r.error } : { choice: r.answers.department.choice, confidence: r.answers.department.confidence, ms: r.ms, right: r.answers.department.choice === BENCH[i][1] });
+      return { model: ok[0]?.model, wall, p50: at(0.5), p95: at(0.95), correct: rows.filter((x) => x.right).length, errors: rs.length - ok.length,
+        tokens: ok.reduce((s, r) => s + (r.usage?.input_tokens || 0), 0), cost: ok.reduce((s, r) => s + r.cost, 0), rows };
+    };
+    const [J, L] = await Promise.all([run(jev), oaKey() ? run(luna) : Promise.resolve(null)]);
+    return { messages: BENCH.map(([text, label]) => ({ text, label })), jev: J, luna: L };
+  },
+
+  // Images: only Decisions reads them. Jev is text-only, so the UI says so instead of faking a result.
+  "POST /api/vision": async (b) => {
+    const v = vision[b.preset];
+    if (!v) throw httpErr(400, "غير معروف");
+    if (typeof b.image !== "string" || !/^data:image\/(png|jpeg|webp|gif);base64,[A-Za-z0-9+/=]+$/.test(b.image)) throw httpErr(400, "الصورة لازم تكون PNG أو JPEG أو WebP");
+    const note = typeof b.note === "string" ? b.note.slice(0, 1000).trim() : "";
+    const questions = v.questions(!!note);
+    const r = await luna({ text: v.prompt + (note ? "\nCustomer's message: " + note : ""), image: b.image }, questions);
+    const { raw, ...rest } = r;
+    return { ...rest, decision: v.decide(r.answers), questions };
+  },
+
   "GET /api/limits": async () => limits.map(({ code, detail, question, ...l }) => ({ ...l, question })),
 
   "POST /api/limit": async (b) => {
@@ -221,7 +330,8 @@ http.createServer(async (req, res) => {
       if (inFlight >= 6) return send(res, 429, { error: "مشغول، جرّب بعد لحظات" });
     }
     let body = "";
-    for await (const c of req) { body += c; if (body.length > 65536) return send(res, 413, { error: "too large" }); }
+    const max = key === "POST /api/vision" ? 4_000_000 : 65536;   // images are downscaled in the browser first
+    for await (const c of req) { body += c; if (body.length > max) return send(res, 413, { error: "too large" }); }
     if (req.method === "POST") inFlight++;
     try {
       const data = await routes[key](body ? JSON.parse(body) : {});

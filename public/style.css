@@ -83,3 +83,7 @@ header{gap:12px;flex-wrap:wrap}
 .hero-brand{display:flex;align-items:center;gap:18px;margin-bottom:18px}
 .hero-brand img{height:64px;background:#fff;border-radius:12px;padding:6px 12px}
 .ag-row.jev{border-color:var(--acc)}.ag-row.claude{border-color:var(--warn);background:#1c1308}
+/* OpenAI Decisions (gpt-6-luna) = teal, distinct from Jev blue and Claude orange */
+:root{--luna:#14b8a6}
+.lane.luna{border-color:#0f766e}.lane.luna .kicker{color:var(--luna)}
+.lane.luna .bar.top .f{background:linear-gradient(90deg,#0f766e,var(--luna))}

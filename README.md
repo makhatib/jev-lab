@@ -32,6 +32,7 @@ Jev Lab تطبيق ويب عربي يعرض هذا الكلام بتجارب ح�
 | **الفكرة** | أنواع أسئلة Jev الثلاثة: اختيار (Choice)، تقييم (Score)، نعم/لا (Noul). |
 | **فرز الرسائل** | يفرز رسائل العملاء: شكوى، شراء، دعم فني، استرجاع… مع نسبة الثقة والتحويل لموظف. فيه كمان: ٢٠ رسالة دفعة وحدة مع حاسبة تكلفة شهرية، وحارس البوابة (كشف محاولات الاختراق)، وتقييم العملاء، وتحليل التقييمات. |
 | **السباق** | نفس الرسالة على Jev وعلى Claude Opus جنب بعض: الزمن والتكلفة. |
+| **Jev ضد OpenAI Decisions** | 🆕 نفس النص ونفس الأسئلة على Jev وعلى `gpt-6-luna` من [OpenAI Decisions API](https://developers.openai.com/api/docs/guides/decisions): مؤقتين، تكلفة، ونسبة الاتفاق. فيه اختبار دقة على ٢٠ رسالة جوابها معروف (بأسئلة إنجليزي أو عربي)، وتحليل صور (مطالبة استرجاع، صورة إعلان) — الصور يقرأها Decisions فقط. |
 | **الثقة والثبات** | هل يتغير الجواب لو غيّرنا ترتيب الخيارات؟ والرسالة الغامضة. |
 | **حدود Jev** | وين ما ينفع Jev (العدّ والحساب والتواريخ)، ومقارنته بدالة كود. |
 | **ساحة التجربة** | اكتب سؤالك وخياراتك بنفسك. |
@@ -53,6 +54,7 @@ Jev Lab تطبيق ويب عربي يعرض هذا الكلام بتجارب ح�
 3. **Claude (اختياري):** يحتاجه «السباق» الحي و«وكيل المتصفح». واحد من اثنين:
    - **توكن اشتراك Claude** (Pro / Max): ثبّت [Claude Code](https://docs.anthropic.com/en/docs/claude-code) في جهازك، وشغّل `claude setup-token`، وانسخ التوكن اللي يبدأ بـ `sk-ant-oat`.
    - أو **مفتاح Anthropic API** من [console.anthropic.com](https://console.anthropic.com/) (للسباق فقط).
+4. **مفتاح OpenAI API (اختياري):** لتبويب «Jev ضد OpenAI Decisions». سوّه من [platform.openai.com/api-keys](https://platform.openai.com/api-keys). Decisions API يحتاج مفتاح API (ما يشتغل باشتراك ChatGPT)، وحط حد إنفاق للمشروع. السعر المنشور: ‎$0.10 لكل مليون توكن إدخال، والإخراج مجاني.
 
 بدون Claude كل التبويبات تشتغل، والسباق يعرض **تقدير** تكلفة النموذج الكبير بدل التشغيل الحي.
 
@@ -68,7 +70,7 @@ docker compose up -d --build
 
 1. افتح **http://localhost:8080/setup**
 2. الصق مفتاح TypeSafe واضغط **«حفظ وتحقق»**.
-3. (اختياري) الصق توكن اشتراك Claude أو مفتاح Anthropic API.
+3. (اختياري) الصق توكن اشتراك Claude أو مفتاح Anthropic API، ومفتاح OpenAI للمقارنة مع Decisions.
 4. افتح **http://localhost:8080** وابدأ من تبويب «فرز الرسائل» ثم «السباق».
 
 **الإيقاف:** `docker compose down` · **التحديث:** `git pull && docker compose up -d --build`
@@ -129,7 +131,7 @@ docker compose up -d --build
 | الخدمة | الوظيفة |
 |---|---|
 | `proxy` | Caddy: نقطة الدخول الوحيدة على `127.0.0.1:8080`. يوجّه `/agent/*` للوكيل والباقي للتطبيق. |
-| `web` | Node.js: الواجهة العربية + API لـ Jev + السباق (Claude Code CLI أو Anthropic SDK). |
+| `web` | Node.js: الواجهة العربية + API لـ Jev + السباق (Claude Code CLI أو Anthropic SDK) + OpenAI Decisions. |
 | `agent` | Python (FastAPI): وكيل المتصفح، مبني على [browser-use/jev-ultrafast](https://github.com/browser-use/jev-ultrafast). |
 | `chrome` | Headless Chromium على شبكة داخلية فقط. |
 | `egress` | Proxy يسمح لـ Chrome بالعناوين العامة فقط. |
@@ -142,6 +144,8 @@ docker compose up -d --build
 | `TYPESAFE_API_KEY` | — | مفتاح Jev (أو من صفحة الإعداد). |
 | `CLAUDE_CODE_OAUTH_TOKEN` | — | توكن اشتراك Claude (أو من صفحة الإعداد). |
 | `ANTHROPIC_API_KEY` | — | مفتاح API بديل للسباق. |
+| `OPENAI_API_KEY` | — | مفتاح OpenAI لمقارنة Decisions (أو من صفحة الإعداد). |
+| `DECISIONS_MODEL` | `gpt-6-luna` | نموذج OpenAI Decisions. |
 
 ## 🛠️ حل المشاكل
 
@@ -152,6 +156,7 @@ docker compose up -d --build
 | البث الحي أسود في «وكيل المتصفح» | انتظر ثواني بعد «شغّل الوكيل». النقطة الخضراء جنب LIVE تعني متصل. |
 | الوكيل وقف بـ blocked | السبب مكتوب بالعربي في سطر النتيجة. جرّب هدف أوضح، مثلاً «أعلى سوار Fitbit تقييماً مع سعره» بدل «Best band». |
 | بعض المواقع تطلب «اختيار الدولة» | طبيعي. Claude يتعامل معها، بس الزمن يزيد. |
+| «مفتاح OpenAI غير صحيح» أو خطأ 403 من OpenAI | تأكد إن المفتاح من مشروع فيه رصيد، وإن حسابك عنده وصول لـ Decisions API (نسخة تجريبية). |
 | أبي أشوف السجلات | `docker compose logs -f agent web` |
 
 ## 🙏 شكر
@@ -159,8 +164,9 @@ docker compose up -d --build
 - [TypeSafe](https://typesafe.ai/) — نموذج Jev.
 - [browser-use/jev-ultrafast](https://github.com/browser-use/jev-ultrafast) — أساس وكيل المتصفح (رخصة MIT، النسخة المضمّنة في `agent/jev_ultrafast/`).
 - [Anthropic Claude](https://www.anthropic.com/claude) — التخطيط والكتابة والتحقق.
+- [OpenAI Decisions API](https://developers.openai.com/api/docs/guides/decisions) — `gpt-6-luna` للمقارنة.
 
-هذا مشروع تعليمي مستقل. مو تابع لـ TypeSafe ولا Anthropic. أرقام الأسعار والسرعة حسب تجاربنا وأرقام TypeSafe المنشورة، وممكن تتغير.
+هذا مشروع تعليمي مستقل. مو تابع لـ TypeSafe ولا Anthropic ولا OpenAI. أرقام الأسعار والسرعة حسب تجاربنا وأرقام TypeSafe المنشورة، وممكن تتغير.
 
 </div>
 
@@ -170,7 +176,7 @@ docker compose up -d --build
 
 ## English
 
-**Jev Lab** is an Arabic demo app for [TypeSafe's Jev](https://typesafe.ai/), a model that never writes text: it returns a decision with a confidence score in under half a second. The app shows message triage, a live race against Claude Opus, confidence tests, Jev's limits, a playground, and a **browser agent** where Jev picks the clicks and Claude plans, writes and verifies.
+**Jev Lab** is an Arabic demo app for [TypeSafe's Jev](https://typesafe.ai/), a model that never writes text: it returns a decision with a confidence score in under half a second. The app shows message triage, a live race against Claude Opus, a **head-to-head with OpenAI's Decisions API (`gpt-6-luna`)** including a 20-message accuracy check and image decisions, confidence tests, Jev's limits, a playground, and a **browser agent** where Jev picks the clicks and Claude plans, writes and verifies.
 
 Built for the **[Malkhatib YouTube channel](https://www.youtube.com/@malkhatib)**.
 
@@ -182,6 +188,7 @@ docker compose up -d --build
 
 - **No keys ship with this repo.** Keys you enter are stored in the `jev-data` Docker volume; `.env` is git-ignored.
 - Claude is optional: a Claude subscription token (`claude setup-token`) or an Anthropic API key.
+- OpenAI is optional: an OpenAI API key enables the Jev vs Decisions tab.
 - The app binds to `127.0.0.1` only. Do not expose it to the internet without authentication.
 - MIT license. `agent/jev_ultrafast/` is vendored from browser-use/jev-ultrafast (MIT).
 

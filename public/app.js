@@ -23,6 +23,11 @@ const AR = {
   intent: "نية الشراء", budget: "الميزانية", timeline: "التوقيت", decision_maker: "صاحب القرار",
   prompt_injection: "محاولة اختراق", abusive: "إساءة", personal_data: "بيانات حساسة", off_topic: "خارج النطاق", harm: "حجم الضرر",
   frustration: "الانزعاج", urgent: "مستعجل", wants_human: "يبي موظف", department: "القسم",
+  stars: "الرضا العام", will_return: "بيرجع؟", product: "المنتج",
+  visible_damage: "ضرر ظاهر", severity: "حجم الضرر", category: "نوع المنتج", claim_supported: "الصورة تطابق كلام العميل",
+  electronics: "إلكترونيات", clothing: "ملابس وأحذية", furniture: "أثاث", food: "أكل وشرب",
+  approve: "اعتماد الاسترجاع تلقائياً", reject_photo: "طلب صورة أوضح", publish: "نشر الإعلان", retake: "إعادة التصوير", reject: "رفض",
+  is_product: "صورة منتج", quality: "جودة الصورة", face: "وجه شخص", contact_info: "رقم أو حساب تواصل",
 };
 const ar = (k) => AR[k] || esc(k);   // unknown values (e.g. model output) are always escaped
 
@@ -116,6 +121,7 @@ const views = {
       <div class="card" style="margin-top:18px"><h2>القاعدة الذهبية</h2>
         <p>نموذج صغير وسريع <b>يقرر ويفرز</b>. النموذج الكبير <b>يفكر ويكتب</b>. والكود يحسب ويقارن ويتصرف.</p>
         <p class="muted">ملاحظة: حسب توثيق TypeSafe، لغة التدريب الأساسية لـ Jev هي الإنجليزي. لذلك في هذا المختبر الأسئلة مكتوبة بالإنجليزي، ونص العميل يبقى بالعربي كما هو — وهذا الأسلوب المقترح من الشركة.</p></div>
+      <div class="card" style="margin-top:18px"><h2>جديد: Jev ضد OpenAI Decisions</h2><p class="muted">OpenAI طلعت <span class="mono">gpt-6-luna</span> على Decisions API بنفس الفكرة. قارن النموذجين على نفس الأسئلة، واختبر دقتهم على ٢٠ رسالة، وجرّب الصور.</p><button class="go" onclick="go('duel')">افتح المقارنة</button></div>
       <p class="muted" style="margin-top:14px">ابدأ من تبويب «فرز الرسائل» ثم «السباق». تبويب «سيناريوهات العرض» فيه خطة الفيديو كاملة.</p>`));
     },
   },
@@ -196,6 +202,147 @@ const views = {
     },
   },
 
+  duel: {
+    t: "Jev ضد OpenAI Decisions",
+    render(el) {
+      const SETS = { triage: ["فرز الرسائل", TRIAGE], guardrail: ["حارس البوابة", GUARD], lead: ["تقييم العملاء", LEADS], reviews: ["تحليل التقييمات", REVIEWS] };
+      el.append(h(`<h1>Jev ضد OpenAI Decisions</h1>
+        <p class="lead">OpenAI طلعت <b>Decisions API</b> بنموذج <span class="mono">gpt-6-luna</span> (نسخة تجريبية عامة). نفس فكرة Jev: ما يكتب نص، يرجع قرار مع احتمال. هنا نعطي النموذجين <b>نفس النص ونفس الأسئلة</b>، ونفس الكود يقرر على أجوبتهم.</p>
+        <div class="grid g3">
+          <div class="card"><h2>نفس الأنواع الثلاثة</h2><table><tr><th>Jev</th><th>Decisions</th></tr><tr><td class="mono">choice</td><td class="mono">choice</td></tr><tr><td class="mono">score</td><td class="mono">score</td></tr><tr><td class="mono">noul</td><td class="mono">predicate</td></tr></table></div>
+          <div class="card"><h2>السعر المنشور</h2><p><b class="mono" style="color:var(--acc)">Jev ‎$0.042</b> لكل مليون توكن إدخال</p><p><b class="mono" style="color:var(--luna)">Luna ‎$0.10</b> لكل مليون توكن إدخال</p><p class="muted">الاثنين: الإخراج مجاني. التكلفة هنا من عدد التوكنات اللي يرجعها كل واحد × سعره.</p></div>
+          <div class="card"><h2>الفرق الأساسي</h2><p>Decisions <b>يقرأ الصور</b> (base64). Jev نص فقط.</p><p class="muted">OpenAI تقول: «أسرع ×10 تقريباً من Responses API». نقيس هنا بنفسنا.</p></div>
+        </div>
+        <div id="d-need"></div>
+
+        <h2 style="margin-top:22px">١. نفس الرسالة، نموذجين</h2>
+        <div class="card">
+          <div class="row" style="margin-top:0"><select id="d-sc" class="ag-in">${Object.entries(SETS).map(([k, v]) => `<option value="${k}">${v[0]}</option>`).join("")}</select>
+          <select id="d-lang" class="ag-in"><option value="en">الأسئلة بالإنجليزي</option><option value="ar">الأسئلة بالعربي</option></select></div>
+          <div id="d-chips"></div><textarea id="st"></textarea>
+          <div class="row"><button class="go" id="d-go">قارن</button><span class="muted" id="d-note"></span></div></div>
+        <div id="d-out" style="margin-top:14px"></div>
+
+        <h2 style="margin-top:22px">٢. اختبار الدقة: ٢٠ رسالة جوابها معروف</h2>
+        <div class="card"><p class="muted">٢٠ رسالة بالعامية، كل وحدة لها قسم صحيح واحد (٤ شكاوى، ٤ شراء، ٤ استفسار، ٣ تقنية، ٣ استرجاع، ٢ أخرى). نرسلها للنموذجين بنفس السؤال، ٨ طلبات بالتوازي لكل نموذج.</p>
+          <div class="row"><select id="b-lang" class="ag-in"><option value="en">الأسئلة بالإنجليزي</option><option value="ar">الأسئلة بالعربي</option></select><button class="go" id="b-go">شغّل الاختبار</button></div></div>
+        <div id="b-out" style="margin-top:14px"></div>
+
+        <h2 style="margin-top:22px">٣. الصور: شي يسويه Decisions وما يسويه Jev</h2>
+        <div class="card"><div class="row" style="margin-top:0"><select id="v-p" class="ag-in"><option value="damage">مطالبة استرجاع: هل المنتج متضرر؟</option><option value="listing">صورة إعلان في سوق إلكتروني: نقبلها؟</option></select>
+          <input type="file" id="v-f" accept="image/png,image/jpeg,image/webp" class="ag-in"></div>
+          <img id="v-prev" style="max-width:260px;max-height:200px;margin-top:10px;display:none;border-radius:10px">
+          <textarea id="v-note" placeholder="(اختياري) كلام العميل، مثلاً: وصلني الجوال والشاشة مكسورة" style="min-height:50px;margin-top:10px"></textarea>
+          <div class="row"><button class="go" id="v-go">حلّل الصورة</button><span class="muted">الصورة تتصغّر في متصفحك (أقصى ضلع 1024px) قبل الإرسال، وما تنحفظ في السيرفر.</span></div></div>
+        <div id="v-out" style="margin-top:14px"></div>`));
+      const $e = (s) => $(s, el), ta = $e("#st");
+      if (!STATUS.openai) $e("#d-need").innerHTML = `<div class="decision warn" style="margin-top:14px">جهة OpenAI تحتاج مفتاح OpenAI API. أضفه من <a href="/setup" style="color:var(--blue)">«الإعداد»</a>. بدونه يشتغل Jev فقط.</div>`;
+      const setSc = () => {
+        const [, list] = SETS[$e("#d-sc").value];
+        $e("#d-chips").innerHTML = presets(list); wirePresets(el.querySelector("#d-chips").parentElement, list, ta); ta.value = list[0][1];
+        $e("#d-lang").disabled = $e("#d-sc").value !== "triage"; if ($e("#d-lang").disabled) $e("#d-lang").value = "en";
+      };
+      $e("#d-sc").onchange = setSc; setSc();
+      $e("#d-note").textContent = "كل جهة لها مؤقت يوقف لما يوصل جوابها. الزمن من الإرسال من سيرفرنا لين الجواب.";
+
+      // One compact panel of answers, same layout for both models.
+      const answersHtml = (answers, questions) => Object.entries(answers).map(([k, a]) => {
+        if (a.type === "refusal") return `<div class="bar"><span>${ar(k)}</span><span class="err">رفض الإجابة</span></div>`;
+        if (a.type === "noul") return meter(AR[k] || k, a.noul);
+        if (a.type === "score") { const n = (questions?.[k]?.criteria?.length || Object.keys(a.probabilities).length) - 1; return meter(`${AR[k] || k} (${a.score.toFixed(2)} من ${n})`, a.score / n, "var(--warn)"); }
+        const top = Object.entries(a.probabilities).sort((x, y) => y[1] - x[1]).slice(0, 3);
+        return `<div class="muted" style="margin-top:8px">${ar(k)} — <b>${ar(a.choice)}</b> · ثقة ${pct(a.confidence)}</div>${bars(Object.fromEntries(top), a.choice)}`;
+      }).join("");
+      const decisionHtml = (sc, d) => {
+        if (sc === "triage") return d.auto ? `تنفيذ تلقائي ← <b>${ar(d.route)}</b>${d.priority === "high" ? " · أولوية عالية" : ""}` : `تحويل لموظف (اقتراح: ${ar(d.route)})`;
+        if (sc === "guardrail") return `<b>${ar(d.action)}</b>${d.reasons.length ? " — " + d.reasons.map(esc).join(" · ") : ""}`;
+        if (sc === "lead") return `<b>${ar(d.tier)}</b> · ${pct(d.total)}`;
+        if (sc === "reviews") return `${"★".repeat(Math.round(d.stars))}${"☆".repeat(5 - Math.round(d.stars))} ${d.stars.toFixed(1)}${d.alerts.length ? " · تنبيه: " + d.alerts.map(ar).join("، ") : ""}`;
+        return "";
+      };
+      // Same value? choice: same pick. score: within 0.5. noul: same side of 50%.
+      const agree = (a, b) => !a || !b || a.type === "refusal" || b.type === "refusal" ? null
+        : a.type === "choice" ? a.choice === b.choice : a.type === "score" ? Math.abs(a.score - b.score) <= 0.5 : (a.noul >= 0.5) === (b.noul >= 0.5);
+      const show = (a) => !a ? "—" : a.type === "refusal" ? "رفض" : a.type === "choice" ? `${ar(a.choice)} ${pct(a.confidence)}` : a.type === "score" ? a.score.toFixed(2) : `نعم ${pct(a.noul)}`;
+
+      $e("#d-go").onclick = async () => {
+        const sc = $e("#d-sc").value, lang = $e("#d-lang").value, out = $e("#d-out"), btn = $e("#d-go"); btn.disabled = true;
+        out.innerHTML = `<div class="vs"><div class="lane jev"><div class="kicker">JEV · TYPESAFE</div><div class="timer" id="tj">0.00s</div><div id="rj"></div></div>
+          <div class="lane luna"><div class="kicker">GPT-6-LUNA · OPENAI DECISIONS</div><div class="timer" id="tl">${STATUS.openai ? "0.00s" : "—"}</div><div id="rl">${STATUS.openai ? "" : `<p class="muted">يحتاج مفتاح OpenAI</p>`}</div></div></div><div id="d-sum"></div>`;
+        const t0 = performance.now(); let doneJ = false, doneL = !STATUS.openai, J = null, L = null;
+        const tick = setInterval(() => { const t = ms(performance.now() - t0); if (!doneJ) $("#tj", out).textContent = t; if (!doneL) $("#tl", out).textContent = t; }, 37);
+        const lane = (r, id, timer) => {
+          $(timer, out).textContent = ms(r.ms);
+          $(id, out).innerHTML = `${answersHtml(r.answers, r.questions)}<div class="decision">قرار الكود: ${decisionHtml(sc, r.decision)}</div>
+            <p class="big">${usd(r.cost)}</p><p class="muted">${esc(r.model)} · ${r.usage?.input_tokens ?? 0} توكن إدخال</p>`;
+          animate(out);
+        };
+        const summary = () => {
+          if (!J || !L || J.error || L.error) return;
+          const names = Object.keys(J.answers);
+          const same = names.map((k) => agree(J.answers[k], L.answers[k]));
+          const n = same.filter((x) => x === true).length, of = same.filter((x) => x !== null).length;
+          const faster = J.ms < L.ms ? `Jev أسرع ×${(L.ms / J.ms).toFixed(1)}` : `Luna أسرع ×${(J.ms / L.ms).toFixed(1)}`;
+          const cheaper = J.cost < L.cost ? `Jev أرخص ×${(L.cost / J.cost).toFixed(1)}` : `Luna أرخص ×${(J.cost / L.cost).toFixed(1)}`;
+          $("#d-sum", out).innerHTML = `<div class="card" style="margin-top:14px"><h2>اتفقوا في ${n} من ${of} أسئلة</h2>
+            <table><tr><th>السؤال</th><th style="color:var(--acc)">Jev</th><th style="color:var(--luna)">Luna</th><th></th></tr>
+            ${names.map((k, i) => `<tr><td>${ar(k)}</td><td class="mono">${esc(show(J.answers[k]))}</td><td class="mono">${esc(show(L.answers[k]))}</td><td>${same[i] === null ? "" : same[i] ? "✔" : '<span class="tag warn">مختلف</span>'}</td></tr>`).join("")}</table>
+            <div class="decision ok">في هذا المثال: ${faster} · ${cheaper}</div>
+            <p class="muted">تجربة وحدة، مو نسبة عامة. «اتفاق» = نفس الاختيار، أو فرق تقييم ≤ 0.5، أو نفس جهة الـ50٪ في نعم/لا. لما يختلفون، ما نعرف مين الصح بدون جواب معروف — شوف اختبار الدقة تحت.</p></div>`;
+        };
+        const fail = (id, e) => `<p class="err">${esc(e.message)}</p>`;
+        const pj = api("/api/duel", { scenario: sc, state: ta.value, lang, which: "jev" }).then((r) => { J = r; doneJ = true; lane(r, "#rj", "#tj"); summary(); })
+          .catch((e) => { J = { error: e }; doneJ = true; $("#rj", out).innerHTML = fail("#rj", e); });
+        const pl = !STATUS.openai ? Promise.resolve() : api("/api/duel", { scenario: sc, state: ta.value, lang, which: "luna" }).then((r) => { L = r; doneL = true; lane(r, "#rl", "#tl"); summary(); })
+          .catch((e) => { L = { error: e }; doneL = true; $("#rl", out).innerHTML = fail("#rl", e); });
+        await Promise.all([pj, pl]); clearInterval(tick); btn.disabled = false;
+      };
+
+      $e("#b-go").onclick = async () => {
+        const out = $e("#b-out"), btn = $e("#b-go"); btn.disabled = true;
+        out.innerHTML = `<p class="muted">يرسل ٢٠ رسالة لكل نموذج…</p>`;
+        try {
+          const r = await api("/api/bench", { lang: $e("#b-lang").value });
+          const col = (x) => !x ? `<td colspan="5" class="muted">يحتاج مفتاح OpenAI</td>` : `<td class="mono"><b>${x.correct}/20</b>${x.errors ? ` <span class="err">(${x.errors} خطأ)</span>` : ""}</td><td class="mono">${ms(x.p50)}</td><td class="mono">${ms(x.p95)}</td><td class="mono">${ms(x.wall)}</td><td class="mono">${usd(x.cost)}</td>`;
+          const perM = (x) => x && x.tokens ? usd((x.cost / 20) * 1e6) : "—";
+          out.innerHTML = `<div class="card"><table><tr><th>النموذج</th><th>صحيح</th><th>الوسيط لكل طلب</th><th>أبطأ ٥٪</th><th>الـ٢٠ كلها</th><th>التكلفة</th></tr>
+            <tr><td><b style="color:var(--acc)">Jev</b> <span class="muted mono">${esc(r.jev.model || "")}</span></td>${col(r.jev)}</tr>
+            <tr><td><b style="color:var(--luna)">Luna</b> <span class="muted mono">${esc(r.luna?.model || "")}</span></td>${col(r.luna)}</tr></table>
+            <div class="decision">مليون رسالة بنفس الطول: Jev ≈ <b>${perM(r.jev)}</b> · Luna ≈ <b>${perM(r.luna)}</b></div>
+            <details open><summary>كل رسالة</summary><table><tr><th>الرسالة</th><th>الصحيح</th><th style="color:var(--acc)">Jev</th><th style="color:var(--luna)">Luna</th></tr>
+            ${r.messages.map((m, i) => { const c = (x) => { const y = x?.rows[i]; return !y ? "—" : y.error ? `<span class="err">خطأ</span>` : `${y.right ? "✔" : "✘"} ${ar(y.choice)} <span class="muted">${pct(y.confidence)}</span>`; };
+              return `<tr><td>${esc(m.text)}</td><td>${ar(m.label)}</td><td class="mono">${c(r.jev)}</td><td class="mono">${c(r.luna)}</td></tr>`; }).join("")}</table></details>
+            <p class="muted">تجربة وحدة على ٢٠ رسالة. الزمن من سيرفرنا في السعودية، ويتأثر بالشبكة لكل مزوّد. التكلفة = توكنات الإدخال الفعلية × السعر المنشور.</p></div>`;
+        } catch (e) { out.innerHTML = `<p class="err">${esc(e.message)}</p>`; }
+        btn.disabled = false;
+      };
+
+      // Downscale in the browser: longest side 1024px, JPEG.
+      let img = null;
+      $e("#v-f").onchange = () => {
+        const f = $e("#v-f").files[0]; if (!f) return;
+        const im = new Image();
+        im.onload = () => { const k = Math.min(1, 1024 / Math.max(im.width, im.height)); const c = document.createElement("canvas");
+          c.width = Math.round(im.width * k); c.height = Math.round(im.height * k); c.getContext("2d").drawImage(im, 0, 0, c.width, c.height);
+          img = c.toDataURL("image/jpeg", 0.85); $e("#v-prev").src = img; $e("#v-prev").style.display = "block"; URL.revokeObjectURL(im.src); };
+        im.src = URL.createObjectURL(f);
+      };
+      $e("#v-go").onclick = async () => {
+        const out = $e("#v-out"), btn = $e("#v-go");
+        if (!img) { out.innerHTML = `<p class="err">اختر صورة أول</p>`; return; }
+        btn.disabled = true; out.innerHTML = `<p class="muted">Luna يشوف الصورة…</p>`;
+        try {
+          const r = await api("/api/vision", { preset: $e("#v-p").value, image: img, note: $e("#v-note").value });
+          out.innerHTML = `<div class="grid g2"><div class="card lane luna"><div class="kicker">GPT-6-LUNA</div>${answersHtml(r.answers, r.questions)}
+              <div class="decision ${r.decision.action === "approve" || r.decision.action === "publish" ? "ok" : "warn"}">قرار الكود: <b>${ar(r.decision.action)}</b> — ${r.decision.reasons.map(esc).join(" · ")}</div>
+              <p class="muted mono">${ms(r.ms)} · ${r.usage?.input_tokens ?? 0} توكن · ${usd(r.cost)}</p></div>
+            <div class="card lane jev"><div class="kicker">JEV</div><h2>ما يقرأ الصور</h2><p class="muted">Jev يستقبل نص فقط. عشان يحكم على صورة، لازم نموذج ثاني يوصفها بنص أول، وهذا يضيف وقت وتكلفة. هنا Decisions له ميزة واضحة.</p></div></div>`;
+          animate(out);
+        } catch (e) { out.innerHTML = `<p class="err">${esc(e.message)}</p>`; }
+        btn.disabled = false;
+      };
+    },
+  },
 
   trust: {
     t: "الثقة والثبات",
@@ -412,13 +559,15 @@ const views = {
         <input type="password" id="ts" placeholder="${STATUS.typesafe ? "محفوظ ✔ — اكتب مفتاح جديد للتغيير" : "الصق المفتاح هنا"}">
         <b style="display:block;margin-top:16px">توكن اشتراك Claude (للسباق الحي ضد Opus 5.5)</b><p class="muted">في جهازك شغّل الأمر <span class="mono">claude setup-token</span> وسجّل دخول باشتراكك، وانسخ التوكن اللي يبدأ بـ <span class="mono">sk-ant-oat</span>.</p>
         <input type="password" id="ct" placeholder="${STATUS.claudeVia === "subscription" ? "محفوظ ✔" : "اختياري"}">
+        <b style="display:block;margin-top:16px">مفتاح OpenAI API (لمقارنة Jev مع OpenAI Decisions)</b><p class="muted">من <a href="https://platform.openai.com/api-keys" target="_blank" style="color:var(--blue)">platform.openai.com/api-keys</a>. Decisions API يحتاج مفتاح API، ما يشتغل باشتراك ChatGPT. حط حد إنفاق للمشروع.</p>
+        <input type="password" id="oa" placeholder="${STATUS.openai ? "محفوظ ✔" : "اختياري"}">
         <label class="row muted"><input type="checkbox" id="rep"> استبدال مفتاح محفوظ (مطلوب لتغيير أي مفتاح موجود)</label>
         <details><summary>أو مفتاح Anthropic API بدل الاشتراك</summary><input type="password" id="an" placeholder="${STATUS.claudeVia === "api" ? "محفوظ ✔" : "اختياري"}"></details>
         <div class="row"><button class="go">حفظ وتحقق</button></div><div class="out"></div></div>`));
       $("button.go", el).onclick = runner(el, async () => {
-        const r = await api("/api/setup", { typesafeKey: $("#ts", el).value || undefined, anthropicKey: $("#an", el).value || undefined, claudeToken: $("#ct", el).value || undefined, replace: $("#rep", el)?.checked === true });
+        const r = await api("/api/setup", { typesafeKey: $("#ts", el).value || undefined, anthropicKey: $("#an", el).value || undefined, claudeToken: $("#ct", el).value || undefined, openaiKey: $("#oa", el).value || undefined, replace: $("#rep", el)?.checked === true });
         await loadStatus();
-        return `<div class="decision ok">تم ✔ ${r.typesafe ? "TypeSafe متصل (" + esc([].concat(r.typesafe).join(", ")) + ")" : ""} ${r.claude ? " · اشتراك Claude متصل" : ""}${r.anthropic ? " · Anthropic متصل" : ""}</div>`;
+        return `<div class="decision ok">تم ✔ ${r.typesafe ? "TypeSafe متصل (" + esc([].concat(r.typesafe).join(", ")) + ")" : ""} ${r.claude ? " · اشتراك Claude متصل" : ""}${r.anthropic ? " · Anthropic متصل" : ""}${r.openai ? " · OpenAI متصل" : ""}</div>`;
       });
     },
   },
@@ -428,7 +577,7 @@ async function loadStatus() {
   STATUS = await api("/api/status");
   const s = $("#status");
   s.className = "pill " + (STATUS.typesafe ? "ok" : "bad");
-  s.textContent = STATUS.typesafe ? `● متصل — ${STATUS.model}${STATUS.anthropic ? " + Opus 5.5" : ""}` : "● يحتاج مفتاح TypeSafe";
+  s.textContent = STATUS.typesafe ? `● متصل — ${STATUS.model}${STATUS.anthropic ? " + Opus 5.5" : ""}${STATUS.openai ? " + " + STATUS.luna : ""}` : "● يحتاج مفتاح TypeSafe";
   s.onclick = STATUS.typesafe ? null : () => go("setup");
 }
 
