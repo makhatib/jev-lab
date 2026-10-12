@@ -26,7 +26,7 @@ const AR = {
   stars: "الرضا العام", will_return: "بيرجع؟", product: "المنتج",
   visible_damage: "ضرر ظاهر", severity: "حجم الضرر", category: "نوع المنتج", claim_supported: "الصورة تطابق كلام العميل",
   electronics: "إلكترونيات", clothing: "ملابس وأحذية", furniture: "أثاث", food: "أكل وشرب",
-  approve: "اعتماد الاسترجاع تلقائياً", reject_photo: "طلب صورة أوضح", publish: "نشر الإعلان", retake: "إعادة التصوير", reject: "رفض",
+  review_fast: "مراجعة بشرية بأولوية", reject_photo: "طلب صورة أوضح", multiple_requests: "أكثر من طلب", publish: "نشر الإعلان", retake: "إعادة التصوير", reject: "رفض",
   is_product: "صورة منتج", quality: "جودة الصورة", face: "وجه شخص", contact_info: "رقم أو حساب تواصل",
 };
 const ar = (k) => AR[k] || esc(k);   // unknown values (e.g. model output) are always escaped
@@ -72,6 +72,7 @@ const TRIAGE = [
   ["غامضة 🤔", "والله ما أدري وش أسوي مع الطلب الأخير، يعني هو وصل بس…"],
   ["ساخرة", "ما شاء الله خدمة سريعة جداً، بس ثلاث أسابيع وأنا أنتظر 👏"],
   ["يبي موظف", "تكفى حولني على موظف حقيقي، ما أبي أكلم بوت"],
+  ["طلبين في رسالة", "وصلني مكسور، والغوا الطلب الثاني"],
 ];
 const GUARD = [
   ["سؤال عادي", "كم رسوم التحويل الدولي من حسابي الجاري؟"],
@@ -228,8 +229,13 @@ const views = {
           <div class="row"><select id="b-lang" class="ag-in"><option value="en">الأسئلة بالإنجليزي</option><option value="ar">الأسئلة بالعربي</option></select><button class="go" id="b-go">شغّل الاختبار</button></div></div>
         <div id="b-out" style="margin-top:14px"></div>
 
-        <h2 style="margin-top:22px">٣. الصور: شي يسويه Decisions وما يسويه Jev</h2>
-        <div class="card"><div class="row" style="margin-top:0"><select id="v-p" class="ag-in"><option value="damage">مطالبة استرجاع: هل المنتج متضرر؟</option><option value="listing">صورة إعلان في سوق إلكتروني: نقبلها؟</option></select>
+        <h2 style="margin-top:22px">٣. فخ ترتيب الخيارات: مين يغيّر جوابه؟</h2>
+        <div class="card"><p class="muted">نفس الرسالة ونفس سؤال القسم، مرة بالترتيب العادي ومرة معكوس. النموذج الثابت يعطي نفس القرار. الرسائل الغامضة أصعب.</p>
+          <textarea id="o-st">${esc(TRIAGE[4][1])}</textarea><div class="row"><button class="go" id="o-go">اختبر النموذجين</button></div></div>
+        <div id="o-out" style="margin-top:14px"></div>
+
+        <h2 style="margin-top:22px">٤. الصور: شي يسويه Decisions وما يسويه Jev</h2>
+        <div class="card"><div class="row" style="margin-top:0"><select id="v-p" class="ag-in"><option value="damage">مطالبة استرجاع: هل يبان ضرر؟ (القرار دايماً لموظف)</option><option value="listing">صورة إعلان في سوق إلكتروني: نقبلها؟</option></select>
           <input type="file" id="v-f" accept="image/png,image/jpeg,image/webp" class="ag-in"></div>
           <img id="v-prev" style="max-width:260px;max-height:200px;margin-top:10px;display:none;border-radius:10px">
           <textarea id="v-note" placeholder="(اختياري) كلام العميل، مثلاً: وصلني الجوال والشاشة مكسورة" style="min-height:50px;margin-top:10px"></textarea>
@@ -303,17 +309,33 @@ const views = {
         out.innerHTML = `<p class="muted">يرسل ٢٠ رسالة لكل نموذج…</p>`;
         try {
           const r = await api("/api/bench", { lang: $e("#b-lang").value });
-          const col = (x) => !x ? `<td colspan="5" class="muted">يحتاج مفتاح OpenAI</td>` : `<td class="mono"><b>${x.correct}/20</b>${x.errors ? ` <span class="err">(${x.errors} خطأ)</span>` : ""}</td><td class="mono">${ms(x.p50)}</td><td class="mono">${ms(x.p95)}</td><td class="mono">${ms(x.wall)}</td><td class="mono">${usd(x.cost)}</td>`;
-          const perM = (x) => x && x.tokens ? usd((x.cost / 20) * 1e6) : "—";
+          const col = (x) => !x ? `<td colspan="5" class="muted">يحتاج مفتاح OpenAI</td>` : `<td class="mono"><b>${x.correct}/20</b>${x.errors ? ` <span class="err">(${x.errors} خطأ)</span>` : ""}${x.refusals ? ` <span class="err">(${x.refusals} رفض)</span>` : ""}</td><td class="mono">${ms(x.p50)}</td><td class="mono">${ms(x.p95)}</td><td class="mono">${ms(x.wall)}</td><td class="mono">${usd(x.cost)}</td>`;
+          const perM = (x) => !x ? "—" : !x.complete ? "غير محسوب (فيه طلبات فشلت أو رفض)" : usd((x.cost / 20) * 1e6);
           out.innerHTML = `<div class="card"><table><tr><th>النموذج</th><th>صحيح</th><th>الوسيط لكل طلب</th><th>أبطأ ٥٪</th><th>الـ٢٠ كلها</th><th>التكلفة</th></tr>
             <tr><td><b style="color:var(--acc)">Jev</b> <span class="muted mono">${esc(r.jev.model || "")}</span></td>${col(r.jev)}</tr>
             <tr><td><b style="color:var(--luna)">Luna</b> <span class="muted mono">${esc(r.luna?.model || "")}</span></td>${col(r.luna)}</tr></table>
             <div class="decision">مليون رسالة بنفس الطول: Jev ≈ <b>${perM(r.jev)}</b> · Luna ≈ <b>${perM(r.luna)}</b></div>
             <details open><summary>كل رسالة</summary><table><tr><th>الرسالة</th><th>الصحيح</th><th style="color:var(--acc)">Jev</th><th style="color:var(--luna)">Luna</th></tr>
-            ${r.messages.map((m, i) => { const c = (x) => { const y = x?.rows[i]; return !y ? "—" : y.error ? `<span class="err">خطأ</span>` : `${y.right ? "✔" : "✘"} ${ar(y.choice)} <span class="muted">${pct(y.confidence)}</span>`; };
+            ${r.messages.map((m, i) => { const c = (x) => { const y = x?.rows[i]; return !y ? "—" : y.error ? `<span class="err">خطأ</span>` : y.refusal ? `<span class="err">رفض</span>` : `${y.right ? "✔" : "✘"} ${ar(y.choice)} <span class="muted">${pct(y.confidence)}</span>`; };
               return `<tr><td>${esc(m.text)}</td><td>${ar(m.label)}</td><td class="mono">${c(r.jev)}</td><td class="mono">${c(r.luna)}</td></tr>`; }).join("")}</table></details>
-            <p class="muted">تجربة وحدة على ٢٠ رسالة. الزمن من سيرفرنا في السعودية، ويتأثر بالشبكة لكل مزوّد. التكلفة = توكنات الإدخال الفعلية × السعر المنشور.</p></div>`;
+            <p class="muted">تجربة وحدة على ٢٠ رسالة، مو اختبار عربي شامل. الأخطاء والرفض منفصلة عن الغلط، والزمن والتكلفة للطلبات اللي رجعت جواب فقط. الزمن من سيرفرنا في السعودية، ويتأثر بالشبكة لكل مزوّد. التكلفة = توكنات الإدخال الفعلية × السعر المنشور.</p></div>`;
         } catch (e) { out.innerHTML = `<p class="err">${esc(e.message)}</p>`; }
+        btn.disabled = false;
+      };
+
+      $e("#o-go").onclick = async () => {
+        const out = $e("#o-out"), btn = $e("#o-go"), state = $e("#o-st").value; btn.disabled = true;
+        out.innerHTML = `<p class="muted">يسأل كل نموذج مرتين…</p>`;
+        const one = (which, name, color) => (which === "luna" && !STATUS.openai ? Promise.resolve(`<div class="card"><h2 style="color:${color}">${name}</h2><p class="muted">يحتاج مفتاح OpenAI</p></div>`)
+          : api("/api/consistency", { state, which }).then((r) => {
+            const f = r.forward.answers.department, b = r.reversed.answers.department;
+            if (f.type === "refusal" || b.type === "refusal") return `<div class="card"><h2 style="color:${color}">${name}</h2><p class="err">رفض الإجابة</p></div>`;
+            const same = f.choice === b.choice;
+            return `<div class="card"><h2 style="color:${color}">${name}</h2><table><tr><td>ترتيب عادي</td><td class="mono">${ar(f.choice)} ${pct(f.confidence)}</td></tr><tr><td>ترتيب معكوس</td><td class="mono">${ar(b.choice)} ${pct(b.confidence)}</td></tr></table>
+              <div class="decision ${same ? "ok" : "warn"}">${same ? "نفس القرار ✔" : "القرار تغيّر مع الترتيب ← تحويل لموظف"}</div></div>`;
+          }).catch((e) => `<div class="card"><h2 style="color:${color}">${name}</h2><p class="err">${esc(e.message)}</p></div>`));
+        const [j, l] = await Promise.all([one("jev", "Jev", "var(--acc)"), one("luna", "Luna", "var(--luna)")]);
+        out.innerHTML = `<div class="grid g2">${j}${l}</div><p class="muted">تجربة وحدة. ثبات القرار ما يعني إنه صح.</p>`;
         btn.disabled = false;
       };
 
@@ -334,9 +356,9 @@ const views = {
         try {
           const r = await api("/api/vision", { preset: $e("#v-p").value, image: img, note: $e("#v-note").value });
           out.innerHTML = `<div class="grid g2"><div class="card lane luna"><div class="kicker">GPT-6-LUNA</div>${answersHtml(r.answers, r.questions)}
-              <div class="decision ${r.decision.action === "approve" || r.decision.action === "publish" ? "ok" : "warn"}">قرار الكود: <b>${ar(r.decision.action)}</b> — ${r.decision.reasons.map(esc).join(" · ")}</div>
+              <div class="decision ${r.decision.action === "publish" ? "ok" : "warn"}">قرار الكود: <b>${ar(r.decision.action)}</b> — ${r.decision.reasons.map(esc).join(" · ")}</div>
               <p class="muted mono">${ms(r.ms)} · ${r.usage?.input_tokens ?? 0} توكن · ${usd(r.cost)}</p></div>
-            <div class="card lane jev"><div class="kicker">JEV</div><h2>ما يقرأ الصور</h2><p class="muted">Jev يستقبل نص فقط. عشان يحكم على صورة، لازم نموذج ثاني يوصفها بنص أول، وهذا يضيف وقت وتكلفة. هنا Decisions له ميزة واضحة.</p></div></div>`;
+            <div class="card lane jev"><div class="kicker">JEV</div><h2>ما يقرأ الصور</h2><p class="muted">Jev يستقبل نص فقط. عشان يحكم على صورة، لازم نموذج ثاني يوصفها بنص أول، وهذا يضيف وقت وتكلفة. هذا فرق في القدرة، مو سباق دقة.</p><p class="muted">الصورة ما تثبت الشراء ولا سبب الضرر ولا الضمان، فالكود ما يعتمد استرجاع من الصورة أبداً.</p></div></div>`;
           animate(out);
         } catch (e) { out.innerHTML = `<p class="err">${esc(e.message)}</p>`; }
         btn.disabled = false;
@@ -465,7 +487,8 @@ const views = {
           <tr><td><b style="color:var(--acc)">⚡ Jev + Claude</b></td>${cell(h1)}</tr>
           <tr><td><b style="color:var(--warn)">🧠 Claude لحاله</b></td>${cell(c1)}</tr></table>
           <div class="decision ok">في هذي التجربة: Jev + Claude ${cs.seconds > hs.seconds ? `أسرع ×${(cs.seconds / hs.seconds).toFixed(1)}` : `أبطأ ×${(hs.seconds / cs.seconds).toFixed(1)}`} و${ct > ht ? `أرخص ×${(ct / ht).toFixed(1)}` : `أغلى ×${(ht / ct).toFixed(1)}`}، وطلبات Claude ${hs.claude_calls} بدل ${cs.claude_calls}.</div>
-          <p class="muted">تجربة وحدة على موقع حي؛ النتائج تختلف من تشغيل لتشغيل. تكلفة Claude تقدير بسعر API، مو فاتورة الاشتراك.</p></div>`;
+          <p class="muted">تجربة وحدة على موقع حي؛ النتائج تختلف من تشغيل لتشغيل. تكلفة Claude تقدير بسعر API، مو فاتورة الاشتراك. الأرقام تشمل التخطيط والكتابة والتحقق والطلبات الفاشلة.</p>
+          <p class="muted">الحدود مو متساوية: Claude لحاله يحتاج طلب لكل خطوة، فحدّه ٤٥ طلب و٣٠٠ ثانية. المختلط حدّه ١٦ طلب Claude و١٨٠ ثانية. عشان كذا ما نقارن نسبة النجاح، نقارن زمن وتكلفة تشغيلين نجحوا بنفس الجواب.</p></div>`;
       };
       loadRuns();
 

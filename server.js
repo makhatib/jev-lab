@@ -1,7 +1,7 @@
 const http = require("http");
 const fs = require("fs");
 const path = require("path");
-const { scenarios, limits, DEPARTMENTS, BENCH, triageQuestionAr, vision } = require("./scenarios");
+const { scenarios, limits, DEPARTMENTS, BENCH, triageQuestionAr, triageQuestionsAr, vision } = require("./scenarios");
 
 const PORT = process.env.PORT || 8080;
 const DATA = process.env.DATA_DIR || "/data";
@@ -225,7 +225,8 @@ const routes = {
   // Same message, same question, options in two orders: does the answer depend on option order?
   "POST /api/consistency": async (b) => {
     const q = { department: scenarios.triage.questions().department };
-    const [a, c] = await Promise.all([jev(b.state, q), jev(b.state, shuffleCriteria(q))]);
+    const fn = b.which === "luna" ? luna : jev;
+    const [a, c] = await Promise.all([fn(b.state, q), fn(b.state, shuffleCriteria(q))]);
     return { forward: a, reversed: c };
   },
 
@@ -262,7 +263,7 @@ const routes = {
     if (!sc) throw httpErr(400, "سيناريو غير معروف");
     if (typeof b.state !== "string" || !b.state.trim() || b.state.length > 5000) throw httpErr(400, "النص فاضي أو طويل جداً");
     const questions = sc.questions();
-    if (b.lang === "ar" && b.scenario === "triage") questions.department = triageQuestionAr();
+    if (b.lang === "ar" && b.scenario === "triage") Object.assign(questions, triageQuestionsAr());
     const r = b.which === "luna" ? await luna(b.state, questions) : await jev(b.state, questions);
     const { raw, ...rest } = r;
     return { ...rest, decision: sc.decide(r.answers, b.opts || {}), questions };
@@ -283,8 +284,11 @@ const routes = {
       const ok = rs.filter((r) => !r.error);
       const lat = ok.map((r) => r.ms).sort((a, c) => a - c);
       const at = (p) => lat.length ? lat[Math.min(lat.length - 1, Math.floor(p * lat.length))] : null;
-      const rows = rs.map((r, i) => r.error ? { error: r.error } : { choice: r.answers.department.choice, confidence: r.answers.department.confidence, ms: r.ms, right: r.answers.department.choice === BENCH[i][1] });
+      const rows = rs.map((r, i) => r.error ? { error: r.error } : r.answers.department.type === "refusal" ? { refusal: true, ms: r.ms }
+        : { choice: r.answers.department.choice, confidence: r.answers.department.confidence, ms: r.ms, right: r.answers.department.choice === BENCH[i][1] });
+      // Latency and cost cover answered requests only; the UI hides projections when anything failed.
       return { model: ok[0]?.model, wall, p50: at(0.5), p95: at(0.95), correct: rows.filter((x) => x.right).length, errors: rs.length - ok.length,
+        refusals: rows.filter((x) => x.refusal).length, complete: rs.length === ok.length && !rows.some((x) => x.refusal),
         tokens: ok.reduce((s, r) => s + (r.usage?.input_tokens || 0), 0), cost: ok.reduce((s, r) => s + r.cost, 0), rows };
     };
     const [J, L] = await Promise.all([run(jev), oaKey() ? run(luna) : Promise.resolve(null)]);

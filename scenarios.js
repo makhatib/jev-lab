@@ -31,6 +31,10 @@ const scenarios = {
         type: "noul",
         instructions: "The customer explicitly asks to talk to a real person, a manager, or a human agent.",
       },
+      multiple_requests: {
+        type: "noul",
+        instructions: "The message contains two or more separate requests about different things, for example reporting a broken item AND asking to cancel a different order. One request with details is not two requests.",
+      },
     }),
     decide(a, opts) {
       const t = opts.threshold ?? 0.6;
@@ -40,6 +44,7 @@ const scenarios = {
       let auto = true;
       if (d.confidence < t) { auto = false; reasons.push(`الثقة ${pct(d.confidence)} أقل من الحد ${pct(t)}`); }
       if (a.wants_human.noul > 0.7) { auto = false; reasons.push("العميل طلب موظف بشري"); }
+      if (a.multiple_requests && a.multiple_requests.noul > 0.6) { auto = false; reasons.push("طلبين مختلفين في رسالة وحدة ← نسأل العميل قبل أي تنفيذ"); }
       const priority = a.frustration.score >= 2 || a.urgent.noul > 0.7 ? "high" : "normal";
       return { route, auto, priority, reasons };
     },
@@ -221,6 +226,17 @@ function triageQuestionAr() {
   };
 }
 
+// All triage questions in Arabic, so the Arabic toggle changes the whole questionnaire.
+function triageQuestionsAr() {
+  return {
+    department: triageQuestionAr(),
+    frustration: { type: "score", instructions: "قدّيش العميل منزعج أو معصّب في هذي الرسالة؟", criteria: ["هادي أو مبسوط", "منزعج شوي", "منزعج بوضوح", "معصّب جداً، يهدد يترك أو يصعّد"] },
+    urgent: { type: "noul", instructions: "العميل يقول إن الموضوع مستعجل أو مرتبط بوقت (اليوم، الحين، فوراً، قبل موعد)." },
+    wants_human: { type: "noul", instructions: "العميل يطلب صراحةً يكلّم شخص حقيقي أو مدير أو موظف." },
+    multiple_requests: { type: "noul", instructions: "الرسالة فيها طلبين أو أكثر عن أشياء مختلفة، مثلاً بلاغ عن منتج مكسور وكمان طلب إلغاء طلب ثاني. طلب واحد مع تفاصيل مو طلبين." },
+  };
+}
+
 // Image cases. Only OpenAI Decisions reads images; Jev is text-only.
 const vision = {
   damage: {
@@ -234,10 +250,12 @@ const vision = {
     decide(a) {
       const reasons = [];
       let action;
-      if (a.visible_damage.noul >= 0.75 && a.severity.score >= 1.5) { action = "approve"; reasons.push("ضرر واضح وكبير في الصورة"); }
-      else if (a.visible_damage.noul <= 0.25) { action = "reject_photo"; reasons.push("ما فيه ضرر واضح في الصورة"); }
-      else { action = "review"; reasons.push("الصورة مو حاسمة"); }
-      if (a.claim_supported && a.claim_supported.noul < 0.5 && action === "approve") { action = "review"; reasons.push("الصورة ما تطابق كلام العميل"); }
+      // A photo never approves a refund on its own: it cannot prove the purchase, the cause, or the warranty.
+      // The code only decides how the claim reaches a person.
+      if (a.visible_damage.noul >= 0.75 && a.severity.score >= 1.5) { action = "review_fast"; reasons.push("ضرر واضح في الصورة ← موظف يراجع بأولوية"); }
+      else if (a.visible_damage.noul <= 0.25) { action = "review"; reasons.push("ما يبان ضرر في الصورة، وهذا مو دليل إن المنتج سليم ← موظف يراجع"); }
+      else { action = "reject_photo"; reasons.push("الصورة مو حاسمة ← نطلب صورة أوضح"); }
+      if (a.claim_supported && a.claim_supported.noul < 0.5 && action === "review_fast") { action = "review"; reasons.push("الصورة ما تطابق كلام العميل"); }
       return { action, reasons };
     },
   },
@@ -263,4 +281,4 @@ const vision = {
 
 function pct(x) { return Math.round(x * 100) + "٪"; }
 
-module.exports = { scenarios, limits, DEPARTMENTS, BENCH, triageQuestionAr, vision };
+module.exports = { scenarios, limits, DEPARTMENTS, BENCH, triageQuestionAr, triageQuestionsAr, vision };
