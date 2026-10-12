@@ -255,7 +255,8 @@ const vision = {
       if (a.visible_damage.noul >= 0.75 && a.severity.score >= 1.5) { action = "review_fast"; reasons.push("ضرر واضح في الصورة ← موظف يراجع بأولوية"); }
       else if (a.visible_damage.noul <= 0.25) { action = "review"; reasons.push("ما يبان ضرر في الصورة، وهذا مو دليل إن المنتج سليم ← موظف يراجع"); }
       else { action = "reject_photo"; reasons.push("الصورة مو حاسمة ← نطلب صورة أوضح"); }
-      if (a.claim_supported && a.claim_supported.noul < 0.5 && action === "review_fast") { action = "review"; reasons.push("الصورة ما تطابق كلام العميل"); }
+      // Photo does not match what the customer says (wrong product, no damage they describe): a person checks it.
+      if (a.claim_supported && a.claim_supported.noul < 0.5) { action = "review"; reasons.splice(0, reasons.length, "الصورة ما تطابق كلام العميل ← موظف يراجع"); }
       return { action, reasons };
     },
   },
