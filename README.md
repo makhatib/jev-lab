@@ -4,16 +4,18 @@
 
 # Jev Lab — مختبر قدرات نموذج Jev
 
-**جرّب بنفسك نموذج Jev من TypeSafe: يقرر ولا يكتب، في أقل من نص ثانية.**
+**جرّب بنفسك نموذج Jev من TypeSafe: يقرر ولا يكتب، في أقل من نص ثانية.**<br>
+**وقارنه وجهاً لوجه مع OpenAI Decisions (`gpt-6-luna`).**
 
 [![YouTube](https://img.shields.io/badge/YouTube-@malkhatib-FF0000?logo=youtube&logoColor=white)](https://www.youtube.com/@malkhatib)
+[![OpenAI Decisions](https://img.shields.io/badge/vs-OpenAI%20Decisions-10a37f?logo=openai&logoColor=white)](#openai)
 [![Docker](https://img.shields.io/badge/Docker-Compose-2496ED?logo=docker&logoColor=white)](#-التشغيل-السريع)
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
 
 هذا المشروع من فيديو قناة **[Malkhatib على يوتيوب](https://www.youtube.com/@malkhatib)**.
 شوف الفيديو، وبعدها شغّل النظام على جهازك وجرّب بنفسك. لو عجبك، اشترك في القناة 🔔
 
-[English summary ↓](#english)
+[⚔️ Jev ضد OpenAI Decisions ↓](#openai) · [English summary ↓](#english)
 
 </div>
 
@@ -44,8 +46,64 @@ Jev Lab تطبيق ويب عربي يعرض هذا الكلام بتجارب ح�
 
 <div align="center">
 <img src="docs/home.png" alt="الصفحة الرئيسية" width="900"><br><br>
+<img src="docs/duel.png" alt="Jev ضد OpenAI Decisions: نفس الرسالة" width="900"><br><br>
 <img src="docs/agent.png" alt="وكيل المتصفح: Jev يضغط وClaude يفكر" width="900">
 </div>
+
+<a id="openai"></a>
+
+## ⚔️ Jev ضد OpenAI Decisions
+
+### وش هو Decisions؟
+
+[OpenAI Decisions API](https://developers.openai.com/api/docs/guides/decisions) واجهة جديدة من OpenAI بنموذج **`gpt-6-luna`** (نسخة تجريبية عامة). نفس فكرة Jev بالضبط: **ما يكتب نص**، يرجع قرار مع احتمال. يعني OpenAI دخلت نفس الفئة، وهذا يثبت إن «نموذج صغير يقرر» صار نمط معتمد.
+
+| | **Jev** (TypeSafe) | **Decisions** (OpenAI) |
+|---|---|---|
+| النموذج | `jev-1.13.0` | `gpt-6-luna` (تجريبي) |
+| أنواع الأسئلة | `choice` · `score` · `noul` | `choice` · `score` · `predicate` |
+| يقرأ الصور؟ | ❌ نص فقط | ✅ (base64) |
+| السعر المنشور (إدخال) | ‎$0.042 لكل مليون توكن | ‎$0.10 لكل مليون توكن |
+| الإخراج | مجاني | مجاني |
+| المفتاح | [console.typesafe.ai/keys](https://console.typesafe.ai/keys) | [platform.openai.com/api-keys](https://platform.openai.com/api-keys) — مفتاح API، **ما يشتغل باشتراك ChatGPT** |
+
+> السعر لكل توكن مو كل القصة: في تجاربنا Luna يحسب تقريباً **نص عدد التوكنات** لنفس الرسالة، فالتكلفة الفعلية طلعت **متقاربة**.
+
+### وش في التبويب؟
+
+التطبيق يرسل **نفس النص ونفس الأسئلة** للنموذجين، و**نفس الكود** يقرر على أجوبتهم. الكود يحوّل بين صيغة Jev وصيغة Decisions (`noul` ↔ `predicate`) عشان المقارنة تكون عادلة.
+
+1. **نفس الرسالة، نموذجين:** فرز الرسائل، حارس البوابة، تقييم العملاء، تحليل التقييمات. لكل نموذج مؤقت وتكلفة، وجدول «اتفقوا في كم سؤال». تقدر تخلي **كل الأسئلة بالعربي**.
+2. **اختبار الدقة (٢٠ رسالة):** ٢٠ رسالة بالعامية، كل وحدة جوابها الصح معروف. يطلع كم صح لكل نموذج، والوسيط وأبطأ ٥٪ من الطلبات، والتكلفة. الأخطاء والرفض تنعرض لحالها، وتقدير «مليون رسالة» يختفي لو فشل أي طلب.
+3. **فخ ترتيب الخيارات:** نفس السؤال، والخيارات مرة بالترتيب ومرة معكوسة. مين يغيّر جوابه؟
+4. **الصور (Decisions فقط):**
+   - **مطالبة استرجاع:** صورة المنتج + كلام العميل ← موظف بأولوية، أو موظف يراجع، أو «أرسل صورة أوضح». **الكود ما يعتمد استرجاع من صورة أبداً**، القرار دايماً لموظف. ولو الصورة ما تطابق كلام العميل، تروح لموظف مع السبب.
+   - **صورة إعلان في سوق إلكتروني:** نشر، أو إعادة تصوير، أو رفض (مثلاً لو فيها رقم جوال).
+
+<div align="center">
+<img src="docs/duel-bench.png" alt="اختبار الدقة: Jev و Luna على ٢٠ رسالة" width="900">
+</div>
+
+### نتائجنا (في تجربتنا، أكتوبر 2026)
+
+| | Jev | Luna |
+|---|---|---|
+| اختبار الـ٢٠ (أسئلة إنجليزي) | **20/20** · وسيط 0.30 ث | **20/20** · وسيط 0.33 ث |
+| اختبار الـ٢٠ (أسئلة عربي) | **20/20** · وسيط 0.28 ث | **20/20** · وسيط 0.31 ث |
+| أبطأ طلب | ~0.5 ث | ~2.2 ث |
+| التكلفة لكل ٢٠ رسالة | ~$0.0005 | ~$0.0005 |
+| اتفقوا على نفس القرار | 18 من 19 رسالة | 18 من 19 رسالة |
+| فخ ترتيب الخيارات | ثابت في كل الرسائل | غيّر جوابه في رسالتين غامضتين |
+| الصور | — | ✅ أقل من ثانية لكل صورة |
+
+**الخلاصة: ما فيه فائز ثابت.** في فرز النصوص الاثنين متقاربين في الدقة والسرعة والتكلفة. Decisions يقرأ الصور. Jev كان أثبت في فخ الترتيب في تجربتنا. الأرقام تتغير من تشغيل لتشغيل، شغّلها بنفسك.
+
+### جرّبها بنفسك
+
+1. شغّل التطبيق ([التشغيل السريع](#-التشغيل-السريع)).
+2. سوّ مفتاح من [platform.openai.com/api-keys](https://platform.openai.com/api-keys)، وحط **حد إنفاق** للمشروع (٥ دولار تكفي وزيادة).
+3. الصقه في `http://localhost:8080/setup` في خانة «مفتاح OpenAI API»، أو اكتبه في `.env` كـ `OPENAI_API_KEY`.
+4. افتح تبويب **«Jev ضد OpenAI Decisions»**. بدون مفتاح OpenAI، جهة Jev تشتغل لحالها.
 
 ## 🧰 المتطلبات
 
@@ -176,7 +234,22 @@ docker compose up -d --build
 
 ## English
 
-**Jev Lab** is an Arabic demo app for [TypeSafe's Jev](https://typesafe.ai/), a model that never writes text: it returns a decision with a confidence score in under half a second. The app shows message triage, a live race against Claude Opus, a **head-to-head with OpenAI's Decisions API (`gpt-6-luna`)** including a 20-message accuracy check and image decisions, confidence tests, Jev's limits, a playground, and a **browser agent** where Jev picks the clicks and Claude plans, writes and verifies.
+**Jev Lab** is an Arabic demo app for [TypeSafe's Jev](https://typesafe.ai/), a model that never writes text: it returns a decision with a confidence score in under half a second. The app shows message triage, a live race against Claude Opus, a **head-to-head with OpenAI's Decisions API (`gpt-6-luna`)**, confidence tests, Jev's limits, a playground, and a **browser agent** where Jev picks the clicks and Claude plans, writes and verifies.
+
+### Jev vs OpenAI Decisions
+
+OpenAI's [Decisions API](https://developers.openai.com/api/docs/guides/decisions) (`gpt-6-luna`, public beta) works like Jev: no generated text, just a decision with a probability. It also reads images. The **Jev vs OpenAI Decisions** tab sends the same text and the same questions to both models, and the same code acts on both answers. It has four parts: same message side by side, a 20-message labelled accuracy test (English or Arabic questions), an option-order trap (does the answer change when the options are reversed?), and image decisions (Decisions only; a refund is never auto-approved from a photo).
+
+| In our test (Oct 2026) | Jev | Luna |
+|---|---|---|
+| 20-message test, EN / AR questions | 20/20 · 20/20 | 20/20 · 20/20 |
+| Median latency | ~0.3 s | ~0.3 s |
+| Slowest request | ~0.5 s | ~2.2 s |
+| Cost per 20 messages | ~$0.0005 | ~$0.0005 |
+| Option-order trap | stable | flipped on 2 ambiguous messages |
+| Images | no | yes |
+
+No fixed winner: text accuracy, speed and cost are close; Decisions reads images; Jev was more stable in the option-order trap in our runs. You need an **OpenAI API key** (a ChatGPT subscription does not work); set a spend limit on the project.
 
 Built for the **[Malkhatib YouTube channel](https://www.youtube.com/@malkhatib)**.
 
